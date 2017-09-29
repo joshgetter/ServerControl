@@ -13,6 +13,7 @@
 #include <vector>
 #include <stdlib.h>
 #include <pthread.h>
+#include <sys/prctl.h>
 
 using namespace std;
 
@@ -41,6 +42,7 @@ public:
             //child level process so create grand-children
             cout << CHILD + "I am main server process\n";
             pid = getpid();
+            prctl(PR_SET_NAME, serverName.c_str(),NULL,NULL,NULL);
             //Update instance with childs pid
             createProcess(minProcs);
             //Finished creating grand-children now wait for signal
@@ -55,7 +57,7 @@ public:
                 grandChildPid = fork();
                 if(grandChildPid){
                     //Still parent server
-                    //Add newly created grand - child.
+                    //Add newly created grand-child.
                     processes.push_back(grandChildPid);
                 }else{
                     //is grand child
@@ -92,6 +94,14 @@ private:
                         Server currServer = Server(tokens[1], atoi((tokens[2].c_str())), atoi(tokens[3].c_str()));
                         serverMap.insert(pair<string,Server>(tokens[1], currServer));
                     }
+                }
+                if(tokens[0] == "displayStatus"){
+                    string rPid;
+                    stringstream output;
+                    output << rootPid;
+                    rPid = output.str();
+                    string cmd = "ps f -o pid,comm -g $(ps -o sid= -p " + rPid + ")";
+                    system(cmd.c_str());
                 }
             }
             
