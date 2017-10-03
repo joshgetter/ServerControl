@@ -15,7 +15,9 @@
 #include <pthread.h>
 #include <sys/prctl.h>
 #include <signal.h>
-
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <stdio.h>
 using namespace std;
 
 class Server;
@@ -34,19 +36,24 @@ public:
     string serverName;
     int minProcs;
     int maxProcs;
+    int numActive;
     pid_t pid;
     vector<pid_t> processes;
     struct sigaction createProcSigAction;
     struct sigaction abortProcSigAction;
+    struct sigaction exitProcSigAction;
     Server(string _serverName, int _minProcs, int _maxProcs){
         serverName = _serverName;
         minProcs = _minProcs;
         maxProcs = _maxProcs;
+        numActive = 0;
         //Register child/grand-child signal handlers
         createProcSigAction.sa_sigaction = incrementProcess;
         abortProcSigAction.sa_sigaction = decrementProcess;
+        exitProcSigAction.sa_sigaction = childExit;
         sigaction(SIGRTMIN+CREATEPROC, &createProcSigAction, NULL);
         sigaction(SIGRTMIN+ABORTPROC, &abortProcSigAction, NULL);
+        sigaction(SIGINT,&exitProcSigAction,NULL);
         pid_t _pid = fork();
         if(!_pid){
             //child level process so create grand-children
@@ -70,6 +77,9 @@ public:
     static void decrementProcess(int sigNum, siginfo_t * sigInfo, void * context){
         serverInstance->incrementProcess(-1);
     }
+    static void childExit(int sigNum, siginfo_t * sigInfo, void * context){
+        exit(0);
+    }
     void createProcess(int num, bool exceedBound = false){
         if(getpid() == pid){
             //Is child level server so continue operation
@@ -81,6 +91,7 @@ public:
                         //Still child level server
                         //Add newly created grand-child.
                         processes.push_back(grandChildPid);
+                        numActive++;
                     }else{
                         //is grand child
                         cout << GRANDCHILD + "I am server instance\n";
@@ -91,25 +102,31 @@ public:
                 //removing processes
                 for(int removed = 0; removed > num; removed--){
                     pid_t removingPid = processes.back();
-                    kill(SIGINT, removingPid);
+                    kill(removingPid, SIGINT);
                     processes.pop_back();
+                    numActive--;
                 }
             }
-
+            
         }
     }
     void incrementProcess(int inc){
-        cout << CHILD << "Num processes, minprocs, maxprocs " << processes.size() << ", " << minProcs << ", " << maxProcs << "\n";
-        if(processes.size() + size_t(inc) >= size_t(minProcs) && processes.size() + size_t(inc) <= size_t(maxProcs)){
+        if(numActive + inc >= minProcs && numActive + inc <= maxProcs){
             createProcess(inc);
         }else{
             cout << CHILD << "Cannot perform operation, number of processes will be out of bounds\n";
         }
     }
     void doNothing(){
+        pid_t _pPid = getppid();
         while(1){
-            pause();
+            if(_pPid == pid){
+                pause();
+            }else{
+                wait(NULL);
+            }
         }
+        
     }
 };
 
@@ -156,6 +173,15 @@ private:
                         cout << CONTROLLER << "That server doesn't exist\n";
                     }else{
                         kill(serverMap.at(tokens[1]).pid, SIGRTMIN + CREATEPROC);
+                    }
+                }
+                if(tokens[0] == "abortProcess"){
+                    if(tokens.size() != size_t(2)){
+                        cout << CONTROLLER << "Invalid parameters for abortProcess\n";
+                    }else if(serverMap.count(tokens[1]) != size_t(1)){
+                        cout << CONTROLLER << "That server doesn't exist\n";
+                    }else{
+                        kill(serverMap.at(tokens[1]).pid, SIGRTMIN + ABORTPROC);
                     }
                 }
             }
