@@ -42,6 +42,7 @@ public:
     struct sigaction createProcSigAction;
     struct sigaction abortProcSigAction;
     struct sigaction exitProcSigAction;
+    struct sigaction abortServSigAction;
     Server(string _serverName, int _minProcs, int _maxProcs){
         serverName = _serverName;
         minProcs = _minProcs;
@@ -51,8 +52,10 @@ public:
         createProcSigAction.sa_sigaction = incrementProcess;
         abortProcSigAction.sa_sigaction = decrementProcess;
         exitProcSigAction.sa_sigaction = childExit;
+        abortServSigAction.sa_sigaction = abortServer;
         sigaction(SIGRTMIN+CREATEPROC, &createProcSigAction, NULL);
         sigaction(SIGRTMIN+ABORTPROC, &abortProcSigAction, NULL);
+        sigaction(SIGRTMIN+ABORTSERV, &abortServSigAction, NULL);
         sigaction(SIGINT,&exitProcSigAction,NULL);
         pid_t _pid = fork();
         if(!_pid){
@@ -80,7 +83,11 @@ public:
     static void childExit(int sigNum, siginfo_t * sigInfo, void * context){
         exit(0);
     }
-    void createProcess(int num, bool exceedBound = false){
+    static void abortServer(int sigNum,siginfo_t * sigInfo, void * context){
+        serverInstance->createProcess(0 - serverInstance->numActive);
+        exit(0);
+    }
+    void createProcess(int num){
         if(getpid() == pid){
             //Is child level server so continue operation
             if(num > 0){
@@ -182,6 +189,17 @@ private:
                         cout << CONTROLLER << "That server doesn't exist\n";
                     }else{
                         kill(serverMap.at(tokens[1]).pid, SIGRTMIN + ABORTPROC);
+                    }
+                }
+                if(tokens[0] == "abortServer"){
+                    if(tokens.size() != size_t(2)){
+                        cout << CONTROLLER << "Invalid parameters for abortServer\n";
+                    }else if(serverMap.count(tokens[1]) != size_t(1)){
+                        cout << CONTROLLER << "That server doesn't exist\n";
+                    }else{
+                        kill(serverMap.at(tokens[1]).pid, SIGRTMIN + ABORTSERV);
+                        wait(NULL);
+                        serverMap.erase(tokens[1]);
                     }
                 }
             }
